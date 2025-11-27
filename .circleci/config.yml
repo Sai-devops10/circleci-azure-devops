@@ -1,0 +1,55 @@
+version: 2.1
+
+jobs:
+  build_and_test:
+    docker:
+      - image: cimg/node:18.10
+    steps:
+      - checkout
+      - run:
+          name: Install Dependencies
+          command: cd app && npm ci
+      - run:
+          name: Run Tests
+          command: cd app && npm test
+
+  docker_build_and_push:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: Build Docker Image
+          command: |
+            docker build -t ${DOCKER_REGISTRY}/${DOCKER_REPO}:${CIRCLE_SHA1} ./app
+      - run:
+          name: Docker Login
+          command: |
+            echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin ${DOCKER_REGISTRY}
+      - run:
+          name: Push Docker Image
+          command: |
+            docker push ${DOCKER_REGISTRY}/${DOCKER_REPO}:${CIRCLE_SHA1}
+
+  deploy_to_azure:
+    docker:
+      - image: mcr.microsoft.com/azure-cli:latest
+    steps:
+      - checkout
+      - run:
+          name: Azure Login
+          command: |
+            az login --service-principal \
+              -u $AZURE_CLIENT_ID \
+              -p $AZURE_CLIENT_SECRET \
+              --tenant $AZURE_TENANT_ID
+
+      - run:
+          name: Deploy Image to Azure Web App
+          command: |
+            az webapp config container set \
+              --name $AZURE_WEBAPP_NAME \
+              --resource-group $AZURE_RESOURCE_GROUP \
+              --docker-custom-image-name ${DOCKER_REGISTRY}/${DOCKER_REPO}:${CIRCLE_SHA1}
